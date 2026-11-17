@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Stats</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14181f;--mute:#677082;--line:#e4e7ec;--cp:#2563eb;--sc:#0d9488;--ok:#15803d;--warn:#b45309}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:14px 14px 40px;max-width:640px;margin-inline:auto}
+h1{font-size:20px;margin:6px 0 2px}
+.sub{color:var(--mute);font-size:13px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat .n{font-size:26px;font-weight:700;letter-spacing:-.5px}
+.stat .l{font-size:12px;color:var(--mute)}
+.big .n{font-size:32px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.row:first-of-type{border-top:0}
+.row .m{color:var(--mute);font-size:12px}
+.pill{font-size:11px;padding:2px 8px;border-radius:99px;background:#eef0f3;color:var(--mute);white-space:nowrap}
+.pill.paid{background:#dcfce7;color:var(--ok)}
+.pill.open{background:#fef3c7;color:var(--warn)}
+.note{font-size:12px;color:var(--mute);margin-top:8px}
+.err{background:#fef2f2;border-color:#fecaca;color:#991b1b;font-size:14px}
+.bars{display:flex;align-items:flex-end;gap:3px;height:60px;margin-top:6px}
+.bars div{flex:1;border-radius:3px 3px 0 0;min-height:2px}
+.axis{display:flex;justify-content:space-between;font-size:11px;color:var(--mute);margin-top:3px}
+button{font:inherit;border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 12px}
+.top{display:flex;justify-content:space-between;align-items:center}
+</style>
+</head>
+<body>
+<div class="top"><div><h1>CounterPack + SheetCheck</h1><div class="sub" id="asof">Loading... (can take up to a minute if the server was asleep)</div></div><button id="rf">Refresh</button></div>
+<div id="app"></div>
+<script>
+(function(){
+var NAMES={counterpack:'CounterPack',sheetcheck:'SheetCheck'};
+var COLORS={counterpack:'#2563eb',sheetcheck:'#0d9488'};
+var VSITES={counterpack:['counterpack','counterpack-pro'],sheetcheck:['sheetcheck']};
+var app=document.getElementById('app');
+function el(t,c,txt){var e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e}
+function usd(c){return '$'+(c/100).toLocaleString(undefined,{minimumFractionDigits:(c%100?2:0),maximumFractionDigits:2})}
+function ago(ts){var s=Math.floor(Date.now()/1000)-ts;if(s<90)return 'just now';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' h ago';return Math.round(s/86400)+' days ago'}
+function stat(n,l,cls){var d=el('div','stat '+(cls||''));d.appendChild(el('div','n',n));d.appendChild(el('div','l',l));return d}
+function sum(arr,f){return arr.reduce(function(a,x){return a+f(x)},0)}
+function render(d){
+  app.textContent='';
+  document.getElementById('asof').textContent='Updated '+new Date(d.generated_at*1000).toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'})+' - sales are live from Stripe';
+  (d.errors||[]).forEach(function(m){app.appendChild(el('div','card err',m))});
+  var st=d.stripe, db=d.db||{};
+  if(st){
+    var pc=st.products.counterpack, ps=st.products.sheetcheck;
+    var paid=pc.paid+ps.paid, rev=pc.revenue_cents+ps.revenue_cents-pc.refunded_cents-ps.refunded_cents;
+    var c=el('div','card'); c.appendChild(el('h2',null,'Sales, both tools'));
+    var g=el('div','grid'); g.appendChild(stat(String(paid),'paid orders','big')); g.appendChild(stat(usd(rev),'revenue after refunds','big')); c.appendChild(g);
+    if(!paid)c.appendChild(el('div','note','No sales yet.'));
+    app.appendChild(c);
+  }
+  var totals={};(db.totals||[]).forEach(function(t){totals[t.site]=t});
+  ['counterpack','sheetcheck'].forEach(function(k){
+    var c=el('div','card'); var h=el('h2');var dot=el('span','dot');dot.style.background=COLORS[k];h.appendChild(dot);h.appendChild(document.createTextNode(NAMES[k]));c.appendChild(h);
+    var g=el('div','grid');
+    var v24=sum(VSITES[k],function(s){return totals[s]?totals[s].last24h:0});
+    var v7=sum(VSITES[k],function(s){return totals[s]?totals[s].last7d:0});
+    var vt=sum(VSITES[k],function(s){return totals[s]?totals[s].total:0});
+    g.appendChild(stat(String(v24),'views, last 24 h'));g.appendChild(stat(String(v7),'views, last 7 days'));
+    if(st){var p=st.products[k];
+      g.appendChild(stat(String(p.opened),'checkouts opened'));
+      g.appendChild(stat(String(p.paid),'paid'));
+      g.appendChild(stat(usd(p.revenue_cents-p.refunded_cents),'revenue after refunds'));
+      g.appendChild(stat(String(vt),'views, total'));
+    }
+    c.appendChild(g);
+    // 14-day bars
+    var days=[];for(var i=13;i>=0;i--){var dt=new Date();dt.setDate(dt.getDate()-i);days.push(dt.toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'}))}
+    var by={};(db.daily||[]).forEach(function(r){if(VSITES[k].indexOf(r.site)>-1)by[r.d]=(by[r.d]||0)+r.n});
+    var max=Math.max.apply(null,days.map(function(x){return by[x]||0}).concat([1]));
+    var bars=el('div','bars');days.forEach(function(x){var b=el('div');b.style.height=Math.max(3,Math.round((by[x]||0)/max*60))+'px';b.style.background=COLORS[k];b.style.opacity=by[x]?1:.25;b.title=x+': '+(by[x]||0);bars.appendChild(b)});
+    c.appendChild(bars);var ax=el('div','axis');ax.appendChild(el('span',null,'14 days ago'));ax.appendChild(el('span',null,'today'));c.appendChild(ax);
+    app.appendChild(c);
+  });
+  var rc=el('div','card');rc.appendChild(el('h2',null,'Recent checkouts'));
+  if(st&&st.recent.length){st.recent.forEach(function(r){
+    var row=el('div','row');var left=el('div');left.appendChild(el('div',null,(NAMES[r.product]||'Other product')+' - '+usd(r.cents)));left.appendChild(el('div','m',ago(r.t)));row.appendChild(left);
+    row.appendChild(el('span','pill '+(r.state==='paid'?'paid':r.state==='open'?'open':''),r.state));rc.appendChild(row)});
+    rc.appendChild(el('div','note','"Checkouts opened" counts every time someone starts the Stripe page. Most never finish and expire after 24 h.'));
+  } else rc.appendChild(el('div','note','Nothing yet.'));
+  app.appendChild(rc);
+  var oc=el('div','card');oc.appendChild(el('h2',null,'SheetCheck email outreach'));
+  var o=db.kv&&db.kv.outreach;
+  if(o&&o.v){var ov=o.v;var g2=el('div','grid');g2.appendChild(stat(String(ov.sent),'emails sent'));g2.appendChild(stat(String(ov.replies),'replies'));g2.appendChild(stat(String(ov.optouts),'opt-outs'));g2.appendChild(stat(String(ov.bounces),'bounced'));oc.appendChild(g2);
+    if(ov.note)oc.appendChild(el('div','note',ov.note));oc.appendChild(el('div','note','Counted from the sending inbox, last checked '+ago(Math.floor(new Date(o.updated_at).getTime()/1000))+'. Updated by Instinct, not automatic.'))}
+  else oc.appendChild(el('div','note','Not loaded yet.'));
+  app.appendChild(oc);
+  var refs=(db.refs||[]);
+  var fc=el('div','card');fc.appendChild(el('h2',null,'Where views come from'));
+  if(refs.length){refs.slice(0,8).forEach(function(r){var row=el('div','row');row.appendChild(el('span',null,r.ref+' ('+(NAMES[r.site]||(r.site==='counterpack-pro'?'CounterPack Pro page':r.site))+')'));row.appendChild(el('b',null,String(r.n)));fc.appendChild(row)})}
+  else fc.appendChild(el('div','note','No referrer data yet. Direct visits and links from apps show as blank.'));
+  fc.appendChild(el('div','note','Views are counted from '+(db.since?new Date(db.since).toLocaleDateString([], {day:'numeric',month:'short'}):'go-live')+'. There is no earlier history. Each page load is one view, so a reload counts again and your own visits count too.'));
+  app.appendChild(fc);
+}
+function load(){
+  fetch(location.pathname.replace(/\/$/,'')+'/data',{cache:'no-store'}).then(function(r){return r.json()}).then(render).catch(function(){document.getElementById('asof').textContent='Could not load. Tap Refresh.'});
+}
+document.getElementById('rf').onclick=load;load();setInterval(load,120000);
+})();
+</script>
+</body>
+</html>
