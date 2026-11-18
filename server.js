@@ -36,15 +36,33 @@ async function stripeList(endpoint, params, maxPages = 5) {
   return out;
 }
 
-function productOf(s) {
+// Blue Hour payment-link URL slugs -> Stripe payment_link ids (cached hourly).
+const BH_SLUGS = ['aFa8wJ3BN2t2djn5z073G03', '00wbIVfkv8Rq6UZ4uW73G04'];
+let plinkCache = { at: 0, ids: null };
+async function bluehourLinkIds() {
+  if (plinkCache.ids && Date.now() - plinkCache.at < 3600000) return plinkCache.ids;
+  try {
+    const links = await stripeList('payment_links', {}, 2);
+    const ids = new Set();
+    for (const l of links) {
+      const slug = (l.url || '').split('/').pop();
+      if (BH_SLUGS.indexOf(slug) > -1) ids.add(l.id);
+    }
+    plinkCache = { at: Date.now(), ids };
+  } catch (e) { /* keep previous (or null -> description matching only) */ }
+  return plinkCache.ids;
+}
+
+function productOf(s, bhIds) {
   const d = ((s.line_items && s.line_items.data || []).map(i => i.description || '').join(' ')).toLowerCase();
   if (d.includes('counterpack')) return 'counterpack';
   if (d.includes('sheetcheck')) return 'sheetcheck';
+  if (d.includes('blue hour') || d.includes('bluehour') || d.includes('crab') || d.includes('seauto')) return 'bluehour';
+  if (bhIds && s.payment_link && bhIds.has(s.payment_link)) return 'bluehour';
   return 'other';
 }
 
 async function stripeStats() {
-  const params = new URLSearchParams();
   const sessions = await (async () => {
     const out = []; let after = null;
     for (let i = 0; i < 5; i++) {
@@ -60,23 +78,25 @@ async function stripeStats() {
   const charges = await stripeList('charges', {}, 5);
   const refunded = {};
   for (const c of charges) if (c.payment_intent) refunded[c.payment_intent] = (refunded[c.payment_intent] || 0) + (c.amount_refunded || 0);
+  const bhIds = await bluehourLinkIds();
 
   const prod = {};
-  for (const k of ['counterpack', 'sheetcheck', 'other']) prod[k] = { opened: 0, paid: 0, revenue_cents: 0, refunded_cents: 0 };
+  for (const k of ['counterpack', 'sheetcheck', 'bluehour', 'other']) prod[k] = { opened: 0, paid: 0, rev: {}, ref: {} };
   const recent = [];
   for (const s of sessions) {
-    const p = productOf(s);
+    const p = productOf(s, bhIds);
     const paid = s.payment_status === 'paid';
     prod[p].opened++;
     let ref = 0;
+    const cur = s.currency || 'usd';
     if (paid) {
       prod[p].paid++;
-      prod[p].revenue_cents += s.amount_total || 0;
+      prod[p].rev[cur] = (prod[p].rev[cur] || 0) + (s.amount_total || 0);
       ref = refunded[s.payment_intent] || 0;
-      prod[p].refunded_cents += ref;
+      prod[p].ref[cur] = (prod[p].ref[cur] || 0) + ref;
     }
     if (p !== 'other') recent.push({
-      t: s.created, product: p, cents: s.amount_total || 0, currency: s.currency,
+      t: s.created, product: p, cents: s.amount_total || 0, currency: cur,
       state: paid ? (ref >= (s.amount_total || 1) ? 'refunded' : 'paid') : (s.status === 'open' ? 'open' : 'not completed')
     });
   }
