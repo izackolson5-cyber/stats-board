@@ -7,7 +7,7 @@
 <meta name="referrer" content="no-referrer">
 <title>Stats</title>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--ink:#14181f;--mute:#677082;--line:#e4e7ec;--cp:#2563eb;--sc:#0d9488;--ok:#15803d;--warn:#b45309}
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14181f;--mute:#677082;--line:#e4e7ec;--cp:#2563eb;--sc:#0d9488;--bh:#1e3a8a;--ok:#15803d;--warn:#b45309}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:14px 14px 40px;max-width:640px;margin-inline:auto}
 h1{font-size:20px;margin:6px 0 2px}
@@ -35,34 +35,41 @@ button{font:inherit;border:1px solid var(--line);background:#fff;border-radius:1
 </style>
 </head>
 <body>
-<div class="top"><div><h1>CounterPack + SheetCheck</h1><div class="sub" id="asof">Loading... (can take up to a minute if the server was asleep)</div></div><button id="rf">Refresh</button></div>
+<div class="top"><div><h1>Your stats</h1><div class="sub" id="asof">Loading... (can take up to a minute if the server was asleep)</div></div><button id="rf">Refresh</button></div>
 <div id="app"></div>
 <script>
 (function(){
-var NAMES={counterpack:'CounterPack',sheetcheck:'SheetCheck'};
-var COLORS={counterpack:'#2563eb',sheetcheck:'#0d9488'};
-var VSITES={counterpack:['counterpack','counterpack-pro'],sheetcheck:['sheetcheck']};
+var NAMES={counterpack:'CounterPack',sheetcheck:'SheetCheck',bluehour:'Blue Hour','counterpack-pro':'CounterPack Pro page'};
+var COLORS={counterpack:'#2563eb',sheetcheck:'#0d9488',bluehour:'#1e3a8a'};
+var VSITES={counterpack:['counterpack','counterpack-pro'],sheetcheck:['sheetcheck'],bluehour:['bluehour']};
+var ORDER=['counterpack','sheetcheck','bluehour'];
+var CUR={usd:'US$',aud:'A$',nzd:'NZ$',eur:'\u20ac',gbp:'\u00a3'};
 var app=document.getElementById('app');
 function el(t,c,txt){var e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e}
-function usd(c){return '$'+(c/100).toLocaleString(undefined,{minimumFractionDigits:(c%100?2:0),maximumFractionDigits:2})}
+function money(c,cur){var p=CUR[cur]||(String(cur||'').toUpperCase()+' ');return p+(c/100).toLocaleString(undefined,{minimumFractionDigits:(c%100?2:0),maximumFractionDigits:2})}
 function ago(ts){var s=Math.floor(Date.now()/1000)-ts;if(s<90)return 'just now';if(s<5400)return Math.round(s/60)+' min ago';if(s<172800)return Math.round(s/3600)+' h ago';return Math.round(s/86400)+' days ago'}
 function stat(n,l,cls){var d=el('div','stat '+(cls||''));d.appendChild(el('div','n',n));d.appendChild(el('div','l',l));return d}
 function sum(arr,f){return arr.reduce(function(a,x){return a+f(x)},0)}
+function netByCur(p){var out={};for(var c in p.rev)out[c]=(out[c]||0)+p.rev[c];for(var c2 in p.ref)out[c2]=(out[c2]||0)-p.ref[c2];return out}
+function revText(p){var n=netByCur(p);var parts=[];for(var c in n)if(n[c])parts.push(money(n[c],c));return parts.length?parts.join(' + '):money(0,'usd')}
 function render(d){
   app.textContent='';
   document.getElementById('asof').textContent='Updated '+new Date(d.generated_at*1000).toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'})+' - sales are live from Stripe';
   (d.errors||[]).forEach(function(m){app.appendChild(el('div','card err',m))});
-  var st=d.stripe, db=d.db||{};
+  var st=d.stripe;
   if(st){
-    var pc=st.products.counterpack, ps=st.products.sheetcheck;
-    var paid=pc.paid+ps.paid, rev=pc.revenue_cents+ps.revenue_cents-pc.refunded_cents-ps.refunded_cents;
-    var c=el('div','card'); c.appendChild(el('h2',null,'Sales, both tools'));
-    var g=el('div','grid'); g.appendChild(stat(String(paid),'paid orders','big')); g.appendChild(stat(usd(rev),'revenue after refunds','big')); c.appendChild(g);
+    var paid=0,revAll={};
+    ORDER.forEach(function(k){var p=st.products[k];paid+=p.paid;var n=netByCur(p);for(var c in n)revAll[c]=(revAll[c]||0)+n[c]});
+    var c=el('div','card'); c.appendChild(el('h2',null,'Sales, all three'));
+    var g=el('div','grid'); g.appendChild(stat(String(paid),'paid orders','big'));
+    var parts=[];for(var cur in revAll)if(revAll[cur])parts.push(money(revAll[cur],cur));
+    g.appendChild(stat(parts.length?parts.join(' + '):money(0,'usd'),'revenue after refunds','big')); c.appendChild(g);
     if(!paid)c.appendChild(el('div','note','No sales yet.'));
     app.appendChild(c);
   }
+  var db=d.db||{};
   var totals={};(db.totals||[]).forEach(function(t){totals[t.site]=t});
-  ['counterpack','sheetcheck'].forEach(function(k){
+  ORDER.forEach(function(k){
     var c=el('div','card'); var h=el('h2');var dot=el('span','dot');dot.style.background=COLORS[k];h.appendChild(dot);h.appendChild(document.createTextNode(NAMES[k]));c.appendChild(h);
     var g=el('div','grid');
     var v24=sum(VSITES[k],function(s){return totals[s]?totals[s].last24h:0});
@@ -72,11 +79,10 @@ function render(d){
     if(st){var p=st.products[k];
       g.appendChild(stat(String(p.opened),'checkouts opened'));
       g.appendChild(stat(String(p.paid),'paid'));
-      g.appendChild(stat(usd(p.revenue_cents-p.refunded_cents),'revenue after refunds'));
+      g.appendChild(stat(revText(p),'revenue after refunds'));
       g.appendChild(stat(String(vt),'views, total'));
     }
     c.appendChild(g);
-    // 14-day bars
     var days=[];for(var i=13;i>=0;i--){var dt=new Date();dt.setDate(dt.getDate()-i);days.push(dt.toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'}))}
     var by={};(db.daily||[]).forEach(function(r){if(VSITES[k].indexOf(r.site)>-1)by[r.d]=(by[r.d]||0)+r.n});
     var max=Math.max.apply(null,days.map(function(x){return by[x]||0}).concat([1]));
@@ -86,7 +92,7 @@ function render(d){
   });
   var rc=el('div','card');rc.appendChild(el('h2',null,'Recent checkouts'));
   if(st&&st.recent.length){st.recent.forEach(function(r){
-    var row=el('div','row');var left=el('div');left.appendChild(el('div',null,(NAMES[r.product]||'Other product')+' - '+usd(r.cents)));left.appendChild(el('div','m',ago(r.t)));row.appendChild(left);
+    var row=el('div','row');var left=el('div');left.appendChild(el('div',null,(NAMES[r.product]||'Other product')+' - '+money(r.cents,r.currency)));left.appendChild(el('div','m',ago(r.t)));row.appendChild(left);
     row.appendChild(el('span','pill '+(r.state==='paid'?'paid':r.state==='open'?'open':''),r.state));rc.appendChild(row)});
     rc.appendChild(el('div','note','"Checkouts opened" counts every time someone starts the Stripe page. Most never finish and expire after 24 h.'));
   } else rc.appendChild(el('div','note','Nothing yet.'));
@@ -99,7 +105,7 @@ function render(d){
   app.appendChild(oc);
   var refs=(db.refs||[]);
   var fc=el('div','card');fc.appendChild(el('h2',null,'Where views come from'));
-  if(refs.length){refs.slice(0,8).forEach(function(r){var row=el('div','row');row.appendChild(el('span',null,r.ref+' ('+(NAMES[r.site]||(r.site==='counterpack-pro'?'CounterPack Pro page':r.site))+')'));row.appendChild(el('b',null,String(r.n)));fc.appendChild(row)})}
+  if(refs.length){refs.slice(0,8).forEach(function(r){var row=el('div','row');row.appendChild(el('span',null,(r.ref||'(direct / app)')+' ('+(NAMES[r.site]||r.site)+')'));row.appendChild(el('b',null,String(r.n)));fc.appendChild(row)})}
   else fc.appendChild(el('div','note','No referrer data yet. Direct visits and links from apps show as blank.'));
   fc.appendChild(el('div','note','Views are counted from '+(db.since?new Date(db.since).toLocaleDateString([], {day:'numeric',month:'short'}):'go-live')+'. There is no earlier history. Each page load is one view, so a reload counts again and your own visits count too.'));
   app.appendChild(fc);
